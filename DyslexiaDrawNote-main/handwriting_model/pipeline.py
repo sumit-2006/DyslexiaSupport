@@ -1,19 +1,33 @@
 # handwriting_model/pipeline.py
 
+import sys
 import os
 import cv2
-from word_detector import prepare_img, detect, sort_multiline
-from char_segmenter import segment_char_images
-from emnist_model import predict_emnist
-from reversal_model import predict_reversal
+import uuid
+import json
+
+
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from server.word_detector import prepare_img, detect, sort_multiline
+from server.char_segmentor import segment_char_images
+from handwriting_model.emnist_model import predict_emnist
+from handwriting_model.reversal_model import predict_reversal
+
 
 def run_pipeline(image_path: str, output_json: str = None):
     # 1) Load & normalize page
     img_raw = cv2.imread(image_path)
+    
+
     img_gray = prepare_img(img_raw, height=800)
 
     # 2) Word detection + sorting
     detections = detect(img_gray, kernel_size=151, sigma=6, theta=10, min_area=400)
+    print(f"[DEBUG] Detected {len(detections)} word candidates")
+
+
     words = sort_multiline(detections)
 
     results = []
@@ -23,6 +37,15 @@ def run_pipeline(image_path: str, output_json: str = None):
             x,y,w,h = det.bbox.x, det.bbox.y, det.bbox.w, det.bbox.h
             word_img = img_gray[y:y+h, x:x+w]
             chars = segment_char_images(word_img)
+            
+
+            debug_dir = f"server/uploads/chars/word_{word_idx}"
+            os.makedirs(debug_dir, exist_ok=True)
+
+            for i, char_img in enumerate(chars):
+                fname = f"{uuid.uuid4().hex[:8]}.png"
+                cv2.imwrite(os.path.join(debug_dir, fname), char_img)
+
 
             word_str = ""
             flips = []
@@ -51,14 +74,12 @@ def run_pipeline(image_path: str, output_json: str = None):
 
     # 4) Optional: save to JSON
     if output_json:
-        import json
         with open(output_json, "w") as f:
             json.dump(results, f, indent=2)
-
     return results
 
 if __name__ == "__main__":
     import sys
     img_path = sys.argv[1]
     out = run_pipeline(img_path)
-    print(out)
+    print(json.dumps(out))

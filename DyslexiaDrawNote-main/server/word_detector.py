@@ -131,8 +131,14 @@ def _cluster_lines(detections: List[DetectorRes],
     res = sorted(clustered.values(), key=lambda line: [det.bbox.y + det.bbox.h / 2 for det in line])
     return res
 
-
 def sort_multiline(detections: List[DetectorRes],
+                   max_dist: float = 0.7,
+                   min_words_per_line: int = 2) -> List[List[DetectorRes]]:
+    lines = _cluster_lines(detections, max_dist, min_words_per_line)
+    return [sort_line(line)[0] for line in lines if line]  # Keep structure
+
+
+'''def sort_multiline(detections: List[DetectorRes],
                    max_dist: float = 0.7,
                    min_words_per_line: int = 2) -> List[List[DetectorRes]]:
     """Cluster detections into lines, then sort the lines according to x-coordinates of word centers.
@@ -150,7 +156,7 @@ def sort_multiline(detections: List[DetectorRes],
     for line in lines:
         res += sort_line(line)
     return res
-
+'''
 
 def sort_line(detections: List[DetectorRes]) -> List[List[DetectorRes]]:
     """Sort the list of detections according to x-coordinates of word centers."""

@@ -95,45 +95,117 @@ def extract_text_lines(img,output_dir):
         filename = 'line'+str(line_idx)+ '.jpg'
         save_img(lines_path,filename=filename,img=roi)
     
-def extract_text_chars(img,output_dir):
+def extract_text_chars(img, output_dir):
     """
-        img - image from which the individual chars are extracted
-        output_dir - directory where the extracted lines should be saved 
+    Extract individual characters from an image and save them.
     """
+    # Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blur = cv2.medianBlur(gray, 7)
+    cv2.imwrite(os.path.join(output_dir, 'debug_gray.jpg'), gray)
 
+    # Apply median blur
+    blur = cv2.medianBlur(gray, 7)
+    cv2.imwrite(os.path.join(output_dir, 'debug_blur.jpg'), blur)
+
+    # Adaptive thresholding
+    thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
+                                   cv2.THRESH_BINARY_INV, 7, 11)
+    cv2.imwrite(os.path.join(output_dir, 'debug_thresh.jpg'), thresh)
+
+    # Dilation to connect components
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 7))
+    dilate = cv2.dilate(thresh, kernel, iterations=1)
+    cv2.imwrite(os.path.join(output_dir, 'debug_dilate.jpg'), dilate)
+
+    # Contour detection
+    cnts = cv2.findContours(dilate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cnts = cnts[0] if len(cnts) == 2 else cnts[1]
+
+    print(f"[DEBUG] Found {len(cnts)} contours")
+
+    chars_path = os.path.join(output_dir, 'chars')
+    if not os.path.exists(chars_path):
+        os.makedirs(chars_path)
+
+    debug_img = img.copy()
+    for char_idx, character in enumerate(cnts, start=-len(cnts)):
+        x, y, w, h = cv2.boundingRect(character)
+        print(f"[DEBUG] Char {char_idx}: x={x}, y={y}, w={w}, h={h}")
+        roi = img[y:y + h, x:x + w]
+        filename = 'char' + str(char_idx) + '.jpg'
+        save_img(chars_path, filename=filename, img=roi)
+
+        # Draw bounding boxes for debugging
+        cv2.rectangle(debug_img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+    cv2.imwrite(os.path.join(output_dir, 'debug_bounding_boxes.jpg'), debug_img)
+
+
+def segment_char_images(img):
+    """
+        Segments individual characters from a word image and returns them as a list of image arrays.
+        This function is used in pipeline inference, so it returns character images rather than saving them.
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    blur = cv2.medianBlur(gray, 7)
     thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 7, 11)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 7))
-
     dilate = cv2.dilate(thresh, kernel, iterations=1)
 
     cnts = cv2.findContours(dilate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if len(cnts) == 2:
-        cnts = cnts[0]
-    else:
-        cnts = cnts[1]
-    
-    chars_path = os.path.join(output_dir,'chars')  
+    cnts = cnts[0] if len(cnts) == 2 else cnts[1]
 
-    if not os.path.exists(chars_path):
-        os.makedirs(chars_path)
-        
-    for char_idx, character in enumerate(cnts, start=-len(cnts)):
-        x, y, w, h = cv2.boundingRect(character)
-        roi = img[y:y + h, x:x + w]
-        filename = 'char'+str(char_idx)+ '.jpg'
-        save_img(chars_path,filename=filename,img=roi)
+    # Sort contours left to right
+    cnts = sorted(cnts, key=lambda c: cv2.boundingRect(c)[0])
+
+    char_imgs = []
+    for c in cnts:
+        x, y, w, h = cv2.boundingRect(c)
+        roi = gray[y:y + h, x:x + w]
+        char_imgs.append(roi)
+
+    return char_imgs
 
 
 
 if __name__ == '__main__':
-    input_dir = os.path.join(os.getcwd(), 'output', 'words')  # or any path where word images are
+    input_dir = os.path.join(os.getcwd(), 'output', 'words')  # where word images are stored
     output_dir = os.path.join(os.getcwd(), 'output', 'chars')
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
     for word_img in os.listdir(input_dir):
         img_path = os.path.join(input_dir, word_img)
+        print(f"[INFO] Reading image: {img_path}")
         img = cv2.imread(img_path)
+
+        if img is None:
+            print(f"[ERROR] Could not read image: {img_path}")
+            continue
+
         word_name = os.path.splitext(word_img)[0]
         word_output_dir = os.path.join(output_dir, word_name)
+
+        if not os.path.exists(word_output_dir):
+            os.makedirs(word_output_dir)
+
+        # Save debug versions of preprocessing steps to visually inspect
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        blur = cv2.medianBlur(gray, 7)
+        thresh = cv2.adaptiveThreshold(
+            blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV, 7, 11
+        )
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 7))
+        dilate = cv2.dilate(thresh, kernel, iterations=1)
+
+        cv2.imwrite(os.path.join(word_output_dir, 'debug_gray.jpg'), gray)
+        cv2.imwrite(os.path.join(word_output_dir, 'debug_thresh.jpg'), thresh)
+        cv2.imwrite(os.path.join(word_output_dir, 'debug_dilate.jpg'), dilate)
+
+        print(f"[INFO] Saved debug images for: {word_img}")
+
         extract_text_chars(img, word_output_dir)
+        print(f"[DONE] Extracted characters to: {word_output_dir}")
+
