@@ -11,7 +11,8 @@ import {
   Type,
   Shapes,
   Edit3,
-  Pen
+  Pen,
+  Download
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
@@ -39,7 +40,6 @@ interface StrokePoint {
   y: number;
   time: number;
   pen_down: boolean;
-  pressure?: number;
   stroke_id?: string;
 }
 
@@ -252,7 +252,7 @@ const DrawingCanvas = ({
       setCurrentStrokeId(newStrokeId);
       setStrokeStartTime(Date.now());
       
-      const strokePoint = createStrokePoint(point.x, point.y, true, point.pressure);
+      const strokePoint = createStrokePoint(point.x, point.y, true);
       setCurrentStroke([strokePoint]);
       
       const ctx = canvas.getContext('2d');
@@ -282,7 +282,7 @@ const DrawingCanvas = ({
       };
       
       // Add stroke point
-      const strokePoint = createStrokePoint(currentPoint.x, currentPoint.y, true, currentPoint.pressure);
+      const strokePoint = createStrokePoint(currentPoint.x, currentPoint.y, true);
       setCurrentStroke(prev => [...prev, strokePoint]);
       
       const ctx = canvas.getContext('2d');
@@ -305,7 +305,7 @@ const DrawingCanvas = ({
         
         // Add final pen_down: false point
         if (touchLastPoint) {
-          const finalStrokePoint = createStrokePoint(touchLastPoint.x, touchLastPoint.y, false, 1);
+          const finalStrokePoint = createStrokePoint(touchLastPoint.x, touchLastPoint.y, false);
           const updatedStroke = [...currentStroke, finalStrokePoint];
           const newAllStrokes = [...allStrokes, ...updatedStroke];
           
@@ -493,7 +493,7 @@ const DrawingCanvas = ({
     setCurrentStrokeId(newStrokeId);
     setStrokeStartTime(Date.now());
     
-    const strokePoint = createStrokePoint(point.x, point.y, true, point.pressure);
+    const strokePoint = createStrokePoint(point.x, point.y, true);
     setCurrentStroke([strokePoint]);
     
     // Store the start point for shape detection
@@ -540,7 +540,7 @@ const DrawingCanvas = ({
     };
     
     // Add stroke point
-    const strokePoint = createStrokePoint(point.x, point.y, true, point.pressure);
+    const strokePoint = createStrokePoint(point.x, point.y, true);
     setCurrentStroke(prev => [...prev, strokePoint]);
     
     // For shape correction, collect points during drawing
@@ -608,7 +608,7 @@ const DrawingCanvas = ({
           pressure: e.pressure || 1
         };
         
-        const finalStrokePoint = createStrokePoint(finalPoint.x, finalPoint.y, false, finalPoint.pressure);
+        const finalStrokePoint = createStrokePoint(finalPoint.x, finalPoint.y, false);
         const updatedStroke = [...currentStroke, finalStrokePoint];
         const newAllStrokes = [...allStrokes, ...updatedStroke];
         
@@ -739,7 +739,7 @@ const DrawingCanvas = ({
     setCurrentStrokeId(newStrokeId);
     setStrokeStartTime(Date.now());
     
-    const strokePoint = createStrokePoint(x, y, true, 1);
+    const strokePoint = createStrokePoint(x, y, true);
     setCurrentStroke([strokePoint]);
     
     setLastPosition({ x, y });
@@ -768,7 +768,7 @@ const DrawingCanvas = ({
     const y = e.clientY - rect.top;
     
     // Add stroke point
-    const strokePoint = createStrokePoint(x, y, true, 1);
+    const strokePoint = createStrokePoint(x, y, true);
     setCurrentStroke(prev => [...prev, strokePoint]);
     
     // Draw line from last position to current position
@@ -780,7 +780,7 @@ const DrawingCanvas = ({
   const stopDrawing = () => {
     if (isDrawing) {
       // Add final pen_down: false point
-      const finalStrokePoint = createStrokePoint(lastPosition.x, lastPosition.y, false, 1);
+      const finalStrokePoint = createStrokePoint(lastPosition.x, lastPosition.y, false);
       const updatedStroke = [...currentStroke, finalStrokePoint];
       const newAllStrokes = [...allStrokes, ...updatedStroke];
       
@@ -865,14 +865,13 @@ const DrawingCanvas = ({
   };
 
   // Create stroke point helper
-  const createStrokePoint = (x: number, y: number, penDown: boolean, pressure?: number): StrokePoint => {
+  const createStrokePoint = (x: number, y: number, penDown: boolean): StrokePoint => {
     const now = Date.now();
     return {
       x,
       y,
       time: strokeStartTime > 0 ? now - strokeStartTime : 0,
       pen_down: penDown,
-      pressure: pressure || 1,
       stroke_id: currentStrokeId
     };
   };
@@ -894,6 +893,31 @@ const DrawingCanvas = ({
   // Handle pen size change
   const handleSizeChange = (size: number) => {
     setPenSize(size);
+  };
+
+  // Function to download stroke data as JSON file
+  const downloadStrokeData = () => {
+    if (allStrokes.length === 0) {
+      return;
+    }
+
+    const strokeData = {
+      timestamp: new Date().toISOString(),
+      total_strokes: allStrokes.length,
+      data: allStrokes
+    };
+
+    const dataStr = JSON.stringify(strokeData, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `stroke_data_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -990,6 +1014,16 @@ const DrawingCanvas = ({
             title="Clear Canvas"
           >
             <Trash2 className="h-5 w-5" />
+          </Button>
+
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={downloadStrokeData}
+            disabled={allStrokes.length === 0}
+            title="Download Stroke Data"
+          >
+            <Download className="h-5 w-5" />
           </Button>
         </div>
       </div>

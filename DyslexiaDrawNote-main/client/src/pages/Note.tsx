@@ -398,6 +398,5 @@ interface StrokePoint {
   y: number;
   time: number;
   pen_down: boolean;
-  pressure?: number;
   stroke_id?: string;
 }
