@@ -130,7 +130,7 @@ const Home = () => {
         />
         <StatCard
           icon={Star}
-          label="Favourites"
+          label="Favorites"
           value={stats?.favoriteNotes ?? '—'}
           color="border-l-yellow-400"
         />
@@ -203,7 +203,7 @@ const Home = () => {
             }`}
             onClick={() => setActiveTab(tab)}
           >
-            {tab === 'all' ? 'All Notes' : tab === 'recent' ? 'Recent' : 'Favourites'}
+            {tab === 'all' ? 'All Notes' : tab === 'recent' ? 'Recent' : 'Favorites'}
           </Button>
         ))}
       </div>
@@ -240,7 +240,7 @@ const Home = () => {
               {searchQuery
                 ? `No notes found matching "${searchQuery}"`
                 : activeTab === 'favorites'
-                  ? "You don't have any favourite notes yet"
+                  ? "You don't have any favorite notes yet"
                   : "You don't have any notes yet. Create one!"}
             </p>
             <Button

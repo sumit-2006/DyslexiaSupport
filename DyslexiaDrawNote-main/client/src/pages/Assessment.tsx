@@ -433,7 +433,7 @@ const Assessment = () => {
                 {/* Tips based on score */}
                 <div className="p-4 bg-green-50 rounded-xl">
                   <p className="font-dyslexic font-semibold text-green-800 mb-2 flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4" /> Personalised Tip
+                    <CheckCircle2 className="h-4 w-4" /> Personalized Tip
                   </p>
                   <p className="font-dyslexic text-sm text-green-700 leading-relaxed">
                     {accuracy < 70

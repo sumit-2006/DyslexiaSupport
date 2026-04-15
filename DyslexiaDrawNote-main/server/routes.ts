@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertNoteSchema } from "@shared/schema";
@@ -7,7 +7,7 @@ import { fromZodError } from "zod-validation-error";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { createWorker } from "tesseract.js";
+import { createWorker, PSM } from "tesseract.js";
 import OpenAI from "openai";
 
 import ocrRoutes from "./routes/ocrRoutes";
@@ -16,6 +16,32 @@ import ocrRoutes from "./routes/ocrRoutes";
 const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
+
+// ── Simple in-memory rate limiter ────────────────────────────────────────────
+// Allows at most MAX_REQUESTS per window per IP.
+const RATE_WINDOW_MS = 60_000; // 1 minute
+const MAX_REQUESTS = 20;
+
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function ocrRateLimit(req: Request, res: Response, next: NextFunction) {
+  const ip = (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
+    ?? req.socket.remoteAddress
+    ?? "unknown";
+  const now = Date.now();
+
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return next();
+  }
+
+  entry.count++;
+  if (entry.count > MAX_REQUESTS) {
+    return res.status(429).json({ message: "Too many requests. Please wait a moment." });
+  }
+  next();
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Register OCR routes
@@ -131,11 +157,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
   });
 
+  const resolvedRawDir = path.resolve(rawDir);
+
   // Recognize text using Tesseract.js on the server
-  app.post("/api/recognize-text", upload.single("image"), async (req, res) => {
+  app.post("/api/recognize-text", ocrRateLimit, upload.single("image"), async (req, res) => {
     const filePath = req.file?.path;
     if (!filePath) {
       return res.status(400).json({ message: "No image uploaded" });
+    }
+
+    // Validate that the file path is within the expected uploads directory
+    const resolvedFilePath = path.resolve(filePath);
+    if (!resolvedFilePath.startsWith(resolvedRawDir + path.sep)) {
+      try { fs.unlinkSync(filePath); } catch (_) {}
+      return res.status(400).json({ message: "Invalid file path" });
     }
 
     let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
@@ -144,10 +179,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         logger: () => {}, // silence progress logs
       });
 
-      // Tesseract PSM 6 = assume a single uniform block of text
-      await worker.setParameters({ tessedit_pageseg_mode: "6" as any });
+      // PSM.SINGLE_BLOCK = assume a single uniform block of text
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK });
 
-      const { data } = await worker.recognize(filePath);
+      const { data } = await worker.recognize(resolvedFilePath);
       const rawText = data.text.trim();
 
       // Build dyslexia-specific correction suggestions
@@ -167,8 +202,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (worker) {
         try { await worker.terminate(); } catch (_) {}
       }
-      // Clean up uploaded file
-      try { fs.unlinkSync(filePath); } catch (_) {}
+      // Clean up uploaded file using the validated resolved path
+      try { fs.unlinkSync(resolvedFilePath); } catch (_) {}
     }
   });
 

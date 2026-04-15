@@ -183,7 +183,7 @@ function augment(tensor: tf.Tensor4D): tf.Tensor4D {
   return tf.tidy(() => {
     let t: tf.Tensor4D = tensor;
 
-    // Random horizontal flip (50 % chance)
+    // Random horizontal flip (50% chance)
     if (Math.random() > 0.5) {
       t = tf.image.flipLeftRight(t) as tf.Tensor4D;
     }
@@ -240,10 +240,11 @@ export async function trainOnBatch(
   await model.save(`file://${MODEL_PATH}`);
 
   xs.dispose();
-  // Dispose augmented tensors (skip the originals — caller owns those)
-  for (let i = 1; i < augmented.length; i += 3) {
-    augmented[i].tensor.dispose();
-    augmented[i + 1]?.tensor.dispose();
+  // Dispose augmented tensors — originals are at indices 0, 3, 6, ... (owned by caller).
+  // Augmented copies are at indices 1, 2, 4, 5, 7, 8, ...
+  for (let i = 0; i < examples.length; i++) {
+    augmented[i * 3 + 1].tensor.dispose();
+    augmented[i * 3 + 2].tensor.dispose();
   }
 
   return history;
