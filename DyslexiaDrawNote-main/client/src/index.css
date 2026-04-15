@@ -36,6 +36,11 @@
     --ring: 0 0% 63.9%;
 
     --radius: 0.5rem;
+
+    /* Accessibility variables — set by the Header controls */
+    --a11y-font-size: 16px;
+    --a11y-letter-spacing: 0.5px;
+    --a11y-line-height: 1.6;
   }
 
   * {
@@ -45,8 +50,9 @@
   body {
     @apply bg-background text-foreground;
     font-family: 'OpenDyslexic', sans-serif;
-    letter-spacing: 0.5px;
-    line-height: 1.6;
+    font-size: var(--a11y-font-size);
+    letter-spacing: var(--a11y-letter-spacing);
+    line-height: var(--a11y-line-height);
   }
 
   .font-dyslexic {
@@ -98,3 +104,4 @@
     border-radius: 50%;
   }
 }
+

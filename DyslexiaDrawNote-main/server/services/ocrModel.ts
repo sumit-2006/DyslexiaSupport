@@ -7,8 +7,8 @@ import * as path from 'path';
 const MODEL_PATH = path.join(process.cwd(), 'ocr-model');
 const MODEL_JSON_PATH = path.join(MODEL_PATH, 'model.json');
 
-// Constants for OCR
-const IMAGE_SIZE = 28; // Standard size for OCR input (28x28)
+// Constants for OCR — upgraded to 64×64 for better detail capture
+const IMAGE_SIZE = 64;
 const CHAR_SET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,?!-_\'";:()[]{}<>';
 
 // Global model instance
@@ -24,70 +24,61 @@ const ensureModelDir = () => {
 /**
  * Create a new model for dyslexic handwriting recognition
  */
+/**
+ * Create a deeper CNN with BatchNormalization for dyslexic handwriting recognition.
+ * Input: 64x64 grayscale images.
+ */
 export async function createModel(): Promise<tf.LayersModel> {
-  // Simple convolutional model for character recognition
   const m = tf.sequential();
-  
-  // Input shape: 28x28 grayscale images (1 channel)
+
+  // Block 1
   m.add(tf.layers.conv2d({
     inputShape: [IMAGE_SIZE, IMAGE_SIZE, 1],
     filters: 32,
     kernelSize: 3,
     activation: 'relu',
-    padding: 'same'
+    padding: 'same',
   }));
-  
-  m.add(tf.layers.maxPooling2d({
-    poolSize: 2,
-    strides: 2
-  }));
-  
-  m.add(tf.layers.conv2d({
-    filters: 64,
-    kernelSize: 3,
-    activation: 'relu',
-    padding: 'same'
-  }));
-  
-  m.add(tf.layers.maxPooling2d({
-    poolSize: 2,
-    strides: 2
-  }));
-  
-  m.add(tf.layers.conv2d({
-    filters: 128,
-    kernelSize: 3,
-    activation: 'relu',
-    padding: 'same'
-  }));
-  
-  m.add(tf.layers.maxPooling2d({
-    poolSize: 2,
-    strides: 2
-  }));
-  
+  m.add(tf.layers.batchNormalization());
+  m.add(tf.layers.conv2d({ filters: 32, kernelSize: 3, activation: 'relu', padding: 'same' }));
+  m.add(tf.layers.batchNormalization());
+  m.add(tf.layers.maxPooling2d({ poolSize: 2, strides: 2 }));
+  m.add(tf.layers.dropout({ rate: 0.25 }));
+
+  // Block 2
+  m.add(tf.layers.conv2d({ filters: 64, kernelSize: 3, activation: 'relu', padding: 'same' }));
+  m.add(tf.layers.batchNormalization());
+  m.add(tf.layers.conv2d({ filters: 64, kernelSize: 3, activation: 'relu', padding: 'same' }));
+  m.add(tf.layers.batchNormalization());
+  m.add(tf.layers.maxPooling2d({ poolSize: 2, strides: 2 }));
+  m.add(tf.layers.dropout({ rate: 0.25 }));
+
+  // Block 3
+  m.add(tf.layers.conv2d({ filters: 128, kernelSize: 3, activation: 'relu', padding: 'same' }));
+  m.add(tf.layers.batchNormalization());
+  m.add(tf.layers.conv2d({ filters: 128, kernelSize: 3, activation: 'relu', padding: 'same' }));
+  m.add(tf.layers.batchNormalization());
+  m.add(tf.layers.maxPooling2d({ poolSize: 2, strides: 2 }));
+  m.add(tf.layers.dropout({ rate: 0.25 }));
+
   m.add(tf.layers.flatten());
-  
-  m.add(tf.layers.dense({
-    units: 256,
-    activation: 'relu'
-  }));
-  
+
+  m.add(tf.layers.dense({ units: 512, activation: 'relu' }));
+  m.add(tf.layers.batchNormalization());
   m.add(tf.layers.dropout({ rate: 0.5 }));
-  
-  // Output layer: one node per character in the charset
-  m.add(tf.layers.dense({
-    units: CHAR_SET.length,
-    activation: 'softmax'
-  }));
-  
-  // Compile the model
+
+  m.add(tf.layers.dense({ units: 256, activation: 'relu' }));
+  m.add(tf.layers.dropout({ rate: 0.3 }));
+
+  // Output layer
+  m.add(tf.layers.dense({ units: CHAR_SET.length, activation: 'softmax' }));
+
   m.compile({
-    optimizer: 'adam',
+    optimizer: tf.train.adam(0.001),
     loss: 'categoricalCrossentropy',
-    metrics: ['accuracy']
+    metrics: ['accuracy'],
   });
-  
+
   return m;
 }
 
@@ -185,7 +176,28 @@ export async function preprocessCanvas(canvasDataUrl: string): Promise<tf.Tensor
 }
 
 /**
- * Train model on a batch of labeled images
+ * Apply lightweight data augmentation to a single 4D tensor.
+ * Returns a new tensor — caller is responsible for disposing it.
+ */
+function augment(tensor: tf.Tensor4D): tf.Tensor4D {
+  return tf.tidy(() => {
+    let t: tf.Tensor4D = tensor;
+
+    // Random horizontal flip (50 % chance)
+    if (Math.random() > 0.5) {
+      t = tf.image.flipLeftRight(t) as tf.Tensor4D;
+    }
+
+    // Random brightness shift ±0.1
+    const delta = (Math.random() - 0.5) * 0.2;
+    t = tf.clipByValue(tf.add(t, delta), 0, 1) as tf.Tensor4D;
+
+    return t;
+  });
+}
+
+/**
+ * Train model on a batch of labeled images with data augmentation.
  */
 export async function trainOnBatch(
   examples: Array<{ tensor: tf.Tensor4D; label: string }>
@@ -193,44 +205,47 @@ export async function trainOnBatch(
   if (!model) {
     model = await initializeModel();
   }
-  
-  // Prepare inputs and targets (one-hot encoded)
-  const batchSize = examples.length;
-  
-  // Convert all inputs to a single tensor of shape [batchSize, IMAGE_SIZE, IMAGE_SIZE, 1]
-  const xs = tf.concat(examples.map(ex => ex.tensor));
-  
-  // Create one-hot encoded targets
+
+  // Build augmented dataset (original + 2 augmented copies per example)
+  const augmented: Array<{ tensor: tf.Tensor4D; label: string }> = [];
+  for (const ex of examples) {
+    augmented.push(ex);
+    augmented.push({ tensor: augment(ex.tensor), label: ex.label });
+    augmented.push({ tensor: augment(ex.tensor), label: ex.label });
+  }
+
+  const batchSize = augmented.length;
+  const xs = tf.concat(augmented.map(ex => ex.tensor));
+
   const ys = tf.buffer([batchSize, CHAR_SET.length]);
-  
-  examples.forEach((example, i) => {
-    // Use only first character of label for simplicity
+  augmented.forEach((example, i) => {
     const char = example.label.charAt(0);
     const charIndex = CHAR_SET.indexOf(char);
-    
     if (charIndex !== -1) {
       ys.set(1, i, charIndex);
     } else {
-      // If character is not in charset, use first character as default
       ys.set(1, i, 0);
-      console.warn(`Character '${char}' not in charset, using '${CHAR_SET[0]}' instead`);
+      console.warn(`Character '${char}' not in charset, defaulting to '${CHAR_SET[0]}'`);
     }
   });
-  
-  // Train for a few epochs
+
   const history = await model.fit(xs, ys.toTensor(), {
-    epochs: 10,
+    epochs: 15,
     batchSize: Math.min(32, batchSize),
     shuffle: true,
-    verbose: 1
+    validationSplit: augmented.length > 6 ? 0.1 : 0,
+    verbose: 1,
   });
-  
-  // Save the updated model
+
   await model.save(`file://${MODEL_PATH}`);
-  
-  // Clean up tensors
+
   xs.dispose();
-  
+  // Dispose augmented tensors (skip the originals — caller owns those)
+  for (let i = 1; i < augmented.length; i += 3) {
+    augmented[i].tensor.dispose();
+    augmented[i + 1]?.tensor.dispose();
+  }
+
   return history;
 }
 

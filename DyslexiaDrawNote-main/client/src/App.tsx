@@ -6,6 +6,7 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import Note from "@/pages/Note";
 import Training from "@/pages/Training";
+import Assessment from "@/pages/Assessment";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 
@@ -18,6 +19,7 @@ function Router() {
           <Route path="/" component={Home} />
           <Route path="/note/:id?" component={Note} />
           <Route path="/training" component={Training} />
+          <Route path="/assessment" component={Assessment} />
           <Route component={NotFound} />
         </Switch>
       </main>
@@ -36,3 +38,4 @@ function App() {
 }
 
 export default App;
+
