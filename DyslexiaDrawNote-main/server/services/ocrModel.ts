@@ -206,7 +206,9 @@ export async function trainOnBatch(
     model = await initializeModel();
   }
 
-  // Build augmented dataset (original + 2 augmented copies per example)
+  // Build augmented dataset: for each original example, generate 2 additional copies
+  // with independent random augmentations (each call to augment() applies a fresh
+  // random flip and brightness shift, so the two copies differ from each other).
   const augmented: Array<{ tensor: tf.Tensor4D; label: string }> = [];
   for (const ex of examples) {
     augmented.push(ex);

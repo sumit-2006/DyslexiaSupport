@@ -9,6 +9,9 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 
+/** Milliseconds to wait after the last canvas event before auto-recognizing. */
+const AUTO_RECOGNIZE_DELAY_MS = 2500;
+
 interface TextRecognitionProps {
   canvasElement: HTMLCanvasElement | null;
   onTextRecognized?: (text: string) => void;
@@ -49,7 +52,7 @@ const TextRecognition = ({ canvasElement, onTextRecognized }: TextRecognitionPro
 
     autoRecognizeTimer.current = setTimeout(() => {
       handleRecognizeText();
-    }, 2500);
+    }, AUTO_RECOGNIZE_DELAY_MS);
 
     return () => {
       if (autoRecognizeTimer.current) clearTimeout(autoRecognizeTimer.current);

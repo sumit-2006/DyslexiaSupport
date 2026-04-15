@@ -166,7 +166,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ message: "No image uploaded" });
     }
 
-    // Validate that the file path is within the expected uploads directory
+    // Validate that the file path is within the expected uploads directory to prevent
+    // path traversal. We resolve to an absolute path and compare against the known dir.
     const resolvedFilePath = path.resolve(filePath);
     if (!resolvedFilePath.startsWith(resolvedRawDir + path.sep)) {
       try { fs.unlinkSync(filePath); } catch (_) {}
@@ -174,7 +175,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
+    let fileBuffer: Buffer | null = null;
     try {
+      // Read the file into a buffer so we don't pass a user-influenced path to Tesseract.
+      fileBuffer = fs.readFileSync(resolvedFilePath);
+
       worker = await createWorker("eng", 1, {
         logger: () => {}, // silence progress logs
       });
@@ -182,7 +187,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // PSM.SINGLE_BLOCK = assume a single uniform block of text
       await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK });
 
-      const { data } = await worker.recognize(resolvedFilePath);
+      const { data } = await worker.recognize(fileBuffer);
       const rawText = data.text.trim();
 
       // Build dyslexia-specific correction suggestions
@@ -202,7 +207,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (worker) {
         try { await worker.terminate(); } catch (_) {}
       }
-      // Clean up uploaded file using the validated resolved path
+      // Clean up uploaded file
       try { fs.unlinkSync(resolvedFilePath); } catch (_) {}
     }
   });
@@ -283,23 +288,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Generate dyslexia-aware correction suggestions for common letter reversals
- * and misspellings that Tesseract might produce.
+ * Generate dyslexia-aware correction suggestions for common misspellings
+ * and transpositions that Tesseract might produce from handwritten text.
  */
 function buildSuggestions(
   text: string,
 ): Array<{ original: string; correction: string }> {
   const suggestions: Array<{ original: string; correction: string }> = [];
 
-  // Common dyslexia OCR confusions
-  const reversalPairs: [RegExp, string][] = [
-    [/\bwas\b/g, "was"],   // 'saw' vs 'was' — keep as hint
-    [/\bsaw\b/g, "saw"],
-    [/\bon\b/g, "on"],
-    [/\bno\b/g, "no"],
-  ];
-
-  // Find simple common OCR errors
+  // Common OCR / dyslexia transcription errors (word → correct spelling)
   const commonErrors: Record<string, string> = {
     teh: "the",
     adn: "and",
@@ -314,6 +311,11 @@ function buildSuggestions(
     wont: "won't",
     iam: "I am",
     im: "I'm",
+    // common b/d reversal words
+    dag: "bag",
+    doy: "boy",
+    dox: "box",
+    dud: "bud",
   };
 
   const words = text.split(/\s+/);
